@@ -52,7 +52,8 @@ struct coordinator {
     std::vector<receive_channel<unsigned>> x_n;
 
     template <typename LFContainer>
-    explicit coordinator(unsigned k, LFContainer& runners): k(k)
+    explicit coordinator(unsigned k, LFContainer& runners):
+        k(k)
     {
         for (unsigned j = 0; j<k; ++j) {
             x_nmkp1.emplace_back(runners[j].x_nmkp1);
@@ -63,23 +64,22 @@ struct coordinator {
     std::vector<unsigned> run(unsigned max_n) {
         result.assign(max_n, 0);
 
+        auto run_one_lane = [this, max_n](unsigned i) {
+            unsigned recipient = i? i-1: k-1;
+
+            for (unsigned j = i; j<max_n; j += k) {
+                unsigned x = x_n[i].get().get();
+                result[j] = x;
+
+                if (j>0 && j+k-1<max_n) {
+                    x_nmkp1[recipient].set(x);
+                }
+            }
+        };
+
         std::vector<hpx::future<void>> wait_list;
         for (unsigned i = 0; i<k; ++i) {
-            wait_list.emplace_back(hpx::async([this, i, max_n]() {
-                for (unsigned j = i; j<max_n; j+=k) {
-                    unsigned x = x_n[i].get().get();
-                    result[j] = x;
-
-                    if (j+k-1>=max_n) continue;
-
-                    if (i>0) {
-                        x_nmkp1[i-1].set(x);
-                    }
-                    else if (j>0) {
-                        x_nmkp1[k-1].set(x);
-                    }
-                }
-            }));
+            wait_list.emplace_back(hpx::async(run_one_lane, i));
         }
 
         hpx::lcos::wait_all(std::move(wait_list));
@@ -96,7 +96,6 @@ std::vector<unsigned> run_lagged_fibonacci(unsigned k, unsigned n) {
         for (unsigned i = 0; i<k; ++i) hpx::async([&lf,i,n]() { lf[i].run(n); });
 
         coordinator coord(k, lf);
-        //result = hpx::async(&coordinator::run, &coord, n).get();
         result = coord.run(n);
     });
 
